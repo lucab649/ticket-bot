@@ -1,0 +1,74 @@
+import time
+import hashlib
+from playwright.sync_api import sync_playwright
+import requests
+import os
+
+TOKEN = os.environ["BOT_TOKEN"]
+CHAT_ID = os.environ["CHAT_ID"]
+
+URLS = {
+    "Regional Sofia": "https://my.weezevent.com/one-piece-sofia-2026",
+    "Treasure Cup Sofia": "https://my.weezevent.com/treasure-cup-sofia-2026"
+}
+
+state = {}
+
+
+def send_telegram(msg):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    requests.post(url, data={
+        "chat_id": CHAT_ID,
+        "text": msg,
+        "disable_web_page_preview": True
+    })
+
+
+def get_page_signature(page):
+    html = page.content()
+    return hashlib.md5(html.encode()).hexdigest()
+
+
+def check():
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+
+        for name, url in URLS.items():
+            page.goto(url, timeout=60000)
+            time.sleep(5)
+
+            html = page.content()
+            sig = hashlib.md5(html.encode()).hexdigest()
+
+            # parole chiave importanti
+            keywords = ["buy", "acquista", "ticket", "available", "checkout"]
+
+            detected = [k for k in keywords if k.lower() in html.lower()]
+
+            if name not in state:
+                state[name] = sig
+                continue
+
+            if state[name] != sig:
+                state[name] = sig
+
+                msg = f"⚠️ CAMBIO RILEVATO: {name}\n{url}"
+
+                if detected:
+                    msg += "\n🔥 POSSIBILE DISPONIBILITÀ BIGLIETTI!"
+
+                send_telegram(msg)
+
+        browser.close()
+
+
+if __name__ == "__main__":
+    send_telegram("🤖 Ticket monitor avviato!")
+    while True:
+        try:
+            check()
+        except Exception as e:
+            send_telegram(f"❌ Errore bot: {e}")
+
+        time.sleep(120)
